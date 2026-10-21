@@ -5,6 +5,9 @@
 
 import React, { useState } from 'react';
 import { useGeneratorData } from './cloud';
+import {StorageMeter} from './StorageMeter';
+import {CabinReports} from './CabinReports';
+import { currentMonth, financials, issueMonth } from './accounting';
 import { 
   Zap, 
   KeyRound, 
@@ -81,16 +84,25 @@ export interface Subscriber {
 }
 
 export default function App() {
-  const {data, change} = useGeneratorData();
+  const {data, change, update} = useGeneratorData();
   const {settings, cabins, subscribers, transactions} = data;
   const setSettings = (value: React.SetStateAction<GeneratorSettings>) => change('settings', value);
   const setCabins = (value: React.SetStateAction<Cabin[]>) => change('cabins', value);
   const setSubscribers = (value: React.SetStateAction<Subscriber[]>) => change('subscribers', value);
   const setTransactions = (value: React.SetStateAction<Transaction[]>) => change('transactions', value);
 
+  const [billingMonth,setBillingMonth] = useState(currentMonth);
+  const issueInvoices = () => {
+    if (!billingMonth || billingMonth > currentMonth()) { triggerToast('اختر الشهر الحالي أو شهرًا سابقًا'); return; }
+    const count=issueMonth(data,billingMonth).invoices.length-data.invoices.length;
+    if (!count) { triggerToast('فواتير هذا الشهر موجودة لجميع المشتركين'); return; }
+    if (!window.confirm('إصدار '+count+' فاتورة لشهر '+billingMonth+' بالسعر الحالي؟ الفواتير السابقة لا تتغير.')) return;
+    update(previous=>issueMonth(previous,billingMonth));
+    triggerToast('تم إصدار الفواتير وترحيل الرصيد السابق');
+  };
   // 5. Navigation & Cabin Dashboard State (3 Tabs)
   const [activeCabinId, setActiveCabinId] = useState<string | null>(null);
-  const [cabinDashboardTab, setCabinDashboardTab] = useState<'overview' | 'customers' | 'overdue'>('overview');
+  const [cabinDashboardTab, setCabinDashboardTab] = useState<'overview' | 'customers' | 'overdue' | 'reports'>('overview');
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
 
   // 6. Customer Profile Modal State (ملف الزبون)
@@ -188,36 +200,7 @@ export default function App() {
     triggerToast(`تم تحديث سعر الأمبير إلى ${Number(modalForm.pricePerAmpere).toLocaleString('ar-IQ')} د.ع`);
   };
 
-  // Helper to calculate financial amounts for any customer
-  const getCustomerFinancials = (sub: Subscriber) => {
-    const totalDue = sub.amps * settings.pricePerAmpere;
-    // Calculate total from transactions if exists, else sub.paidAmount
-    const custTxs = transactions.filter((t) => t.customerId === sub.id);
-    const txsSum = custTxs.reduce((sum, t) => sum + t.amount, 0);
-    const effectivePaid = custTxs.length > 0 ? txsSum : sub.paidAmount;
-    const remainingBalance = Math.max(0, totalDue - effectivePaid);
-    const isFullyPaid = remainingBalance === 0;
-
-    return {
-      totalDue,
-      effectivePaid,
-      remainingBalance,
-      isFullyPaid,
-    };
-  };
-
-  // =========================================================================
-  // THE GOLDEN DATABASE OPTIMIZATION LOGIC (المنطق الذهبي لتحسين الذاكرة)
-  // When a customer's remaining balance hits 0 (account zeroed), immediately
-  // clear/purge their old transactions array to optimize memory & state!
-  // =========================================================================
-  const applyGoldenOptimizationRule = (customerId: string, newRemainingBalance: number) => {
-    if (newRemainingBalance <= 0) {
-      // Purge transactions for this customer
-      setTransactions((prev) => prev.filter((t) => t.customerId !== customerId));
-      triggerToast('✨ تم تصفير الحساب بنجاح! تم إفراغ سجل الوصولات القديمة لتخفيف الذاكرة');
-    }
-  };
+  const getCustomerFinancials = (sub: Subscriber) => financials(data,sub.id);
 
   // Submit payment for active profile customer
   const handleRecordPayment = (e: React.FormEvent) => {
@@ -227,13 +210,14 @@ export default function App() {
     if (!currentSub) return;
 
     const amount = Number(paymentInputAmount);
-    if (!amount || amount <= 0) {
+    if (!Number.isFinite(amount) || amount <= 0) {
       triggerToast('يرجى إدخال مبلغ صحيح');
       return;
     }
 
     const { remainingBalance } = getCustomerFinancials(currentSub);
     const effectivePayment = Math.min(amount, remainingBalance);
+    if (effectivePayment <= 0) return;
     const newRemaining = Math.max(0, remainingBalance - effectivePayment);
 
     // Create new transaction
@@ -267,7 +251,7 @@ export default function App() {
     setPaymentInputAmount('');
 
     // Check golden rule
-    applyGoldenOptimizationRule(currentSub.id, newRemaining);
+    if (newRemaining === 0) triggerToast('تم التسديد بالكامل وحفظ الوصل');
 
     if (newRemaining > 0) {
       triggerToast(`تم تسديد ${effectivePayment.toLocaleString('ar-IQ')} د.ع (المتبقي: ${newRemaining.toLocaleString('ar-IQ')} د.ع)`);
@@ -302,7 +286,7 @@ export default function App() {
     if (!editingTransaction) return;
 
     const newAmount = Number(editInputAmount);
-    if (!newAmount || newAmount <= 0) {
+    if (!Number.isFinite(newAmount) || newAmount <= 0) {
       triggerToast('يرجى إدخال مبلغ صحيح');
       return;
     }
@@ -328,15 +312,9 @@ export default function App() {
       })
     );
 
-    // Check remaining balance
-    const totalDue = currentSub.amps * settings.pricePerAmpere;
-    const newPaid = Math.max(0, currentSub.paidAmount + delta);
-    const newRemaining = Math.max(0, totalDue - newPaid);
-
     setEditingTransaction(null);
     setEditInputAmount('');
 
-    applyGoldenOptimizationRule(currentSub.id, newRemaining);
     triggerToast('تم تعديل الدفعة بنجاح وتحديث الرصيد');
   };
 
@@ -382,6 +360,7 @@ export default function App() {
   // Confirm and execute customer deletion
   const handleConfirmDeleteCustomer = () => {
     if (!customerToDelete) return;
+    if (data.invoices.some(i=>i.customerId===customerToDelete.id) || transactions.some(t=>t.customerId===customerToDelete.id)) { triggerToast('لا يمكن حذف مشترك لديه فواتير أو وصولات محفوظة'); return; }
     const deletedName = customerToDelete.name;
     const deletedId = customerToDelete.id;
 
@@ -415,7 +394,10 @@ export default function App() {
       paidAmount: 0, // Unpaid by default
     };
 
-    setSubscribers((prev) => [newSub, ...prev]);
+    update(previous=> {
+      const month=currentMonth();
+      return {...previous,subscribers:[newSub,...previous.subscribers],invoices:[...previous.invoices,{id:newSub.id+':'+month,customerId:newSub.id,month,amps:newSub.amps,rate:previous.settings.pricePerAmpere,amount:newSub.amps*previous.settings.pricePerAmpere}]};
+    });
     setNewSubName('');
     setNewSubAmps('5');
     setNewSubPhone('');
@@ -512,6 +494,7 @@ export default function App() {
   // Confirm delete cabin
   const handleConfirmDeleteCabin = () => {
     if (!cabinToDelete) return;
+    if (subscribers.some(s=>s.cabinId===cabinToDelete.id)) { triggerToast('لا يمكن حذف كابينة تحتوي مشتركين حفاظًا على سجلاتهم'); return; }
     const deletedName = cabinToDelete.name;
     const deletedId = cabinToDelete.id;
 
@@ -609,6 +592,11 @@ export default function App() {
       {/* Main Responsive Mobile Frame */}
       <div className="w-full max-w-md mx-auto min-h-screen flex flex-col bg-slate-950 relative border-x border-slate-900 shadow-2xl">
         
+        <section dir="rtl" className="p-4 border-b border-slate-800 space-y-2">
+          <label htmlFor="billing-month" className="block text-sm">الفوترة الشهرية لجميع المشتركين</label>
+          <div className="flex gap-2"><input id="billing-month" type="month" value={billingMonth} max={currentMonth()} onChange={e=>setBillingMonth(e.target.value)} className="min-w-0 bg-slate-800 rounded-xl p-2 flex-1"/><button onClick={issueInvoices} className="bg-amber-400 text-slate-950 rounded-xl px-3 font-bold">إصدار الفواتير</button></div>
+          <p className="text-xs text-slate-400">المتأخرات تبقى في الرصيد. لا تتكرر فاتورة الشهر نفسه.</p>
+        </section>
         {/* --- Top Header with Stealth Backdoor (1001) --- */}
         <header className="sticky top-0 z-30 bg-slate-900/90 backdrop-blur-md border-b border-slate-800/80 px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -740,6 +728,7 @@ export default function App() {
 
             {/* --- 3 Tabs Bar (الرئيسية / الزبائن / المتأخرون) --- */}
             <div className="bg-slate-900/80 p-1 rounded-2xl border border-slate-800 flex items-center gap-1">
+            <button onClick={()=>setCabinDashboardTab('reports')} className={cabinDashboardTab==='reports'?'flex-1 rounded-xl py-2 px-1 text-xs bg-amber-500 text-slate-950 font-bold':'flex-1 rounded-xl py-2 px-1 text-xs bg-slate-800 text-slate-100 font-bold'}>التقارير</button>
               <button
                 onClick={() => setCabinDashboardTab('overview')}
                 className={`flex-1 py-2 px-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
@@ -789,6 +778,7 @@ export default function App() {
               </button>
             </div>
 
+            {cabinDashboardTab === 'reports' && <CabinReports cabinId={activeCabin.id}/>}
             {/* TAB 1: OVERVIEW */}
             {cabinDashboardTab === 'overview' && (
               <motion.div
@@ -1422,7 +1412,7 @@ export default function App() {
                     </div>
 
                     <div className="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
-                      <span>إجمالي المستحق لهذا الشهر:</span>
+                      <span>إجمالي الفواتير:</span>
                       <span className="font-mono-numbers text-slate-200 font-bold">
                         {activeCustomerFinancials.totalDue.toLocaleString('ar-IQ')} د.ع
                       </span>
@@ -1448,19 +1438,17 @@ export default function App() {
                     </button>
                   </div>
 
-                  {/* Golden Logic Information Notice */}
-                  {activeCustomerFinancials.isFullyPaid && (
-                    <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-3.5 flex items-start gap-2.5 text-xs text-emerald-300">
-                      <Sparkles className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                      <div>
-                        <span className="font-bold block">ميزة تحسين قاعدة البيانات النشطة:</span>
-                        <p className="text-[11px] text-emerald-200/80 mt-0.5 leading-relaxed">
-                          بما أن الباقي أصبح (0 د.ع)، تم تلقائياً مسح وتفريغ سجل الوصولات القديمة لهذا الزبون لتخفيف حجم قاعدة البيانات ومنع تراكم البيانات غير الضرورية.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
+                  <section className="space-y-3 rounded-2xl bg-slate-900 p-4">
+                    <h4 className="font-bold">الفواتير الشهرية — التسديد للأقدم أولاً</h4>
+                    {activeCustomerFinancials.openingCredit > 0 && <p className="text-xs text-amber-300">رصيد تسديد سابق: {activeCustomerFinancials.openingCredit.toLocaleString('ar-IQ')} د.ع (وصولاته غير متوفرة في النسخة القديمة)</p>}
+                    {activeCustomerFinancials.credit > 0 && <p>رصيد دائن: {activeCustomerFinancials.credit.toLocaleString('ar-IQ')} د.ع</p>}
+                    {[...activeCustomerFinancials.invoices].reverse().map(invoice=><div key={invoice.id} className="border-b border-slate-700 pb-3 text-sm space-y-1">
+                      <strong>{invoice.month}{invoice.opening?' — رصيد افتتاحي من النسخة السابقة':''}</strong>
+                      <p>{invoice.amps} أمبير × {invoice.rate.toLocaleString('ar-IQ')} د.ع = {invoice.amount.toLocaleString('ar-IQ')} د.ع</p>
+                      <p>المسدد: {invoice.paid.toLocaleString('ar-IQ')} · المتبقي: {invoice.remaining.toLocaleString('ar-IQ')} د.ع</p>
+                    </div>)}
+                    <p className="text-xs text-slate-400">تغيير السعر أو الأمبير يطبق على الفواتير الجديدة فقط. الوصولات تبقى بعد اكتمال التسديد.</p>
+                  </section>
                   {/* Bottom Section: Transactions History (سجل المعاملات) */}
                   <div className="space-y-2.5 pt-2 border-t border-slate-800">
                     <div className="flex items-center justify-between">
@@ -1476,7 +1464,7 @@ export default function App() {
                         <Receipt className="w-6 h-6 text-slate-600 mx-auto" />
                         <p className="text-xs font-medium text-slate-400">
                           {activeCustomerFinancials.isFullyPaid 
-                            ? 'السجل فارغ (تم تصفيره تلقائياً لاكتمال التسديد)'
+                            ? 'لا توجد وصولات محفوظة'
                             : 'لا توجد دفعات مسجلة بعد لهذا الزبون'}
                         </p>
                       </div>
@@ -2442,6 +2430,7 @@ export default function App() {
                 </div>
 
                 <form onSubmit={handleSaveSettings} className="p-5 space-y-4 overflow-y-auto">
+                  <StorageMeter data={data}/>
                   <div className="space-y-1.5">
                     <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
                       <span className="flex items-center gap-1.5">
@@ -2495,7 +2484,7 @@ export default function App() {
                       </span>
                     </div>
                     <p className="text-[11px] text-amber-400/90 bg-amber-500/10 p-2 rounded-lg border border-amber-500/20">
-                      💡 تغيير سعر الأمبير هنا سيقوم بإعادة احتساب مستحقات جميع المشتركين في كافة الكابينات فورياً.
+                      💡 السعر الجديد يطبق على الفواتير الجديدة فقط، ولا يغير فواتير الأشهر السابقة.
                     </p>
                   </div>
 

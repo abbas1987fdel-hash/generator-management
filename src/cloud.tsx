@@ -3,12 +3,13 @@ import {initializeApp} from 'firebase/app';
 import {doc, getFirestore, onSnapshot, runTransaction, serverTimestamp} from 'firebase/firestore';
 import {emptyData, checkWrite, type GeneratorData} from './data';
 import firebaseConfig from './firebase-config.json';
+import {normalizeLedger} from './accounting';
 
 const firebase = initializeApp(firebaseConfig);
 const db = getFirestore(firebase);
 const ref = doc(db, 'generator', 'main');
 type Change = <K extends keyof GeneratorData>(key: K, value: React.SetStateAction<GeneratorData[K]>) => void;
-const Context = createContext<{data: GeneratorData; change: Change} | null>(null);
+const Context = createContext<{data: GeneratorData; change: Change; update: (transform: (data: GeneratorData)=>GeneratorData)=>void} | null>(null);
 export function useGeneratorData() {
   const value = useContext(Context);
   if (!value) throw new Error('Missing generator provider');
@@ -37,10 +38,15 @@ export function CloudProvider({children}: {children: React.ReactNode}) {
       if (dirty.current || saving.current || snapshot.metadata.fromCache) return;
       const row=snapshot.data();
       revision.current=row?.revision ?? 0;
-      current.current=row?.data ?? emptyData();
+      current.current=normalizeLedger(row?.data ?? emptyData());
       setData(current.current); setReady(true);
     }, () => setError('تعذر تحميل البيانات. تحقق من الاتصال وصلاحيات حسابك ثم أعد المحاولة.'));
   },[]);
+  const update = (transform: (data: GeneratorData)=>GeneratorData) => {
+    if (!online || saving.current) return;
+    current.current=transform(current.current);
+    dirty.current=true; setBusy(true); setData(current.current);
+  };
   const change: Change = (key,value) => {
     if (!online || saving.current) return;
     const previous=current.current;
@@ -67,5 +73,5 @@ export function CloudProvider({children}: {children: React.ReactNode}) {
   const panel=(content:React.ReactNode)=><main dir="rtl" className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6"><section className="max-w-md w-full rounded-3xl border border-slate-700 bg-slate-900 p-8 text-center space-y-5"><h1 className="text-2xl font-bold text-amber-400">مولدة حسن كريم كاظم</h1>{content}</section></main>;
   const button='rounded-xl bg-amber-400 text-slate-950 px-6 py-3 font-bold';
   if(!ready) return panel(<><p>{error||'جارٍ تحميل البيانات…'}</p>{error&&<button className={button} onClick={()=>location.reload()}>إعادة المحاولة</button>}</>);
-  return <Context.Provider value={{data,change}}><div dir="rtl" className="bg-slate-900 text-xs p-2 flex justify-between text-slate-300"><span>{busy?'جارٍ الحفظ…':online?'البيانات محفوظة سحابيًا':'غير متصل — العرض فقط'}</span></div>{children}{(!online||busy||error)&&<div className="fixed inset-0 z-[100] bg-slate-950/90 flex items-center justify-center p-6" dir="rtl"><section className="max-w-lg text-center space-y-4"><p role="alert">{error||(!online?'اتصل بالإنترنت لمتابعة العمل وحفظ العمليات.':'جارٍ حفظ العملية…')}</p>{error&&<><button className={button} onClick={exportDraft}>تنزيل نسخة من التعديل</button><button className="block mx-auto underline" onClick={()=>{dirty.current=false;location.reload();}}>إعادة تحميل البيانات المحفوظة</button></>}</section></div>}</Context.Provider>;
+  return <Context.Provider value={{data,change,update}}><div dir="rtl" className="bg-slate-900 text-xs p-2 flex justify-between text-slate-300"><span>{busy?'جارٍ الحفظ…':online?'البيانات محفوظة سحابيًا':'غير متصل — العرض فقط'}</span></div>{children}{(!online||busy||error)&&<div className="fixed inset-0 z-[100] bg-slate-950/90 flex items-center justify-center p-6" dir="rtl"><section className="max-w-lg text-center space-y-4"><p role="alert">{error||(!online?'اتصل بالإنترنت لمتابعة العمل وحفظ العمليات.':'جارٍ حفظ العملية…')}</p>{error&&<><button className={button} onClick={exportDraft}>تنزيل نسخة من التعديل</button><button className="block mx-auto underline" onClick={()=>{dirty.current=false;location.reload();}}>إعادة تحميل البيانات المحفوظة</button></>}</section></div>}</Context.Provider>;
 }
