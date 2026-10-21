@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /generator/main {
+      allow read: if true;
+      allow create: if request.resource.data.revision == 1 && valid();
+      allow update: if request.resource.data.revision == resource.data.revision + 1 && valid();
+      function valid() {
+        return request.resource.data.keys().hasOnly(['data','revision','updatedAt'])
+          && request.resource.data.data.keys().hasOnly(['settings','cabins','subscribers','transactions'])
+          && request.resource.data.data.settings is map
+          && request.resource.data.data.cabins is list
+          && request.resource.data.data.subscribers is list
+          && request.resource.data.data.transactions is list;
+      }
+    }
+  }
+}
