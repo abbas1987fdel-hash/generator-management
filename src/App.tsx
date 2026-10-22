@@ -7,8 +7,9 @@ import React, { useState } from 'react';
 import {accessCode,validateCodeChange} from './access';
 import {whatsappAccountLink} from './whatsapp';
 import { useGeneratorData } from './cloud';
+import {ThemeToggle} from './ThemeToggle';
 import {StorageMeter} from './StorageMeter';
-import { currentMonth, financials, issueMonth } from './accounting';
+import { currentMonth, financials } from './accounting';
 import { 
   Zap, 
   KeyRound, 
@@ -93,15 +94,6 @@ function GeneratorApp({onLock}:{onLock:()=>void}) {
   const setSubscribers = (value: React.SetStateAction<Subscriber[]>) => change('subscribers', value);
   const setTransactions = (value: React.SetStateAction<Transaction[]>) => change('transactions', value);
 
-  const [billingMonth,setBillingMonth] = useState(currentMonth);
-  const issueInvoices = () => {
-    if (!billingMonth || billingMonth > currentMonth()) { triggerToast('اختر الشهر الحالي أو شهرًا سابقًا'); return; }
-    const count=issueMonth(data,billingMonth).invoices.length-data.invoices.length;
-    if (!count) { triggerToast('فواتير هذا الشهر موجودة لجميع المشتركين'); return; }
-    if (!window.confirm('إصدار '+count+' فاتورة لشهر '+billingMonth+' بالسعر الحالي؟ الفواتير السابقة لا تتغير.')) return;
-    update(previous=>issueMonth(previous,billingMonth));
-    triggerToast('تم إصدار الفواتير وترحيل الرصيد السابق');
-  };
   // 5. Navigation & Cabin Dashboard State (3 Tabs)
   const [activeCabinId, setActiveCabinId] = useState<string | null>(null);
   const [cabinDashboardTab, setCabinDashboardTab] = useState<'overview' | 'customers' | 'overdue'>('overview');
@@ -187,6 +179,20 @@ function GeneratorApp({onLock}:{onLock:()=>void}) {
   };
 
   const getCustomerFinancials = (sub: Subscriber) => financials(data,sub.id);
+
+  const settleAccount = (sub: Subscriber) => {
+    const amount=financials(data,sub.id).remainingBalance;
+    if(amount<=0)return;
+    if(!window.confirm(`تصفير حساب ${sub.name}؟\nتأكيد استلام مبلغ ${amount.toLocaleString('ar-IQ')} د.ع وتسديد كامل المتبقي. سيُحفظ وصل في معاملات الزبون.`))return;
+    const now=new Date();
+    const date=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Baghdad',year:'numeric',month:'2-digit',day:'2-digit'}).format(now);
+    const receipt:Transaction={id:'tx-'+crypto.randomUUID(),customerId:sub.id,amount,date,time:now.toLocaleTimeString('ar-IQ',{timeZone:'Asia/Baghdad',hour:'2-digit',minute:'2-digit'})};
+    update(previous=>{
+      if(!previous.subscribers.some(s=>s.id===sub.id)||financials(previous,sub.id).remainingBalance!==amount)throw new Error('تغير الرصيد. راجع الحساب قبل التسديد.');
+      return {...previous,transactions:[receipt,...previous.transactions],subscribers:previous.subscribers.map(s=>s.id===sub.id?{...s,paidAmount:s.paidAmount+amount}:s)};
+    });
+    triggerToast('تم تسجيل التسديد الكامل في معاملات الزبون');
+  };
 
   // Submit payment for active profile customer
   const handleRecordPayment = (e: React.FormEvent) => {
@@ -562,11 +568,7 @@ function GeneratorApp({onLock}:{onLock:()=>void}) {
       {/* Main Responsive Mobile Frame */}
       <div className="w-full max-w-md mx-auto min-h-screen flex flex-col bg-slate-950 relative border-x border-slate-900 shadow-2xl">
         
-        <section dir="rtl" className="p-4 border-b border-slate-800 space-y-2">
-          <label htmlFor="billing-month" className="block text-sm">الفوترة الشهرية لجميع المشتركين</label>
-          <div className="flex gap-2"><input id="billing-month" type="month" value={billingMonth} max={currentMonth()} onChange={e=>setBillingMonth(e.target.value)} className="min-w-0 bg-slate-800 rounded-xl p-2 flex-1"/><button onClick={issueInvoices} className="bg-amber-400 text-slate-950 rounded-xl px-3 font-bold">إصدار الفواتير</button></div>
-          <p className="text-xs text-slate-400">المتأخرات تبقى في الرصيد. لا تتكرر فاتورة الشهر نفسه.</p>
-        </section>
+        <div dir="rtl" className="p-3 border-b border-slate-800 flex justify-end"><ThemeToggle /></div>
         {/* --- Top Header with Stealth Backdoor (1001) --- */}
         <header className="sticky top-0 z-30 bg-slate-900/90 backdrop-blur-md border-b border-slate-800/80 px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -829,6 +831,7 @@ function GeneratorApp({onLock}:{onLock:()=>void}) {
                         >
                           <div className="flex flex-col gap-3">
                             <div className="space-y-1 min-w-0 flex-1">
+                              <button type="button" disabled={isFullyPaid} onClick={e=>{e.stopPropagation();settleAccount(sub);}} className="float-left rounded-lg border border-emerald-500/30 bg-emerald-600/20 text-emerald-400 px-2 py-1 text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed">تصفير الحساب</button>
                               <div className="flex items-center gap-2">
                                 <h4 className="text-sm font-bold text-slate-100 break-words whitespace-normal group-hover:text-amber-400 transition-colors">
                                   {sub.name}
@@ -1058,6 +1061,7 @@ function GeneratorApp({onLock}:{onLock:()=>void}) {
                   )
                   .map((cabin) => {
                     const cabinSubs = subscribers.filter((s) => s.cabinId === cabin.id);
+                    const cabinTotals = accountTotals(cabinSubs);
                     const cabinOverdueCount = cabinSubs.filter((s) => !getCustomerFinancials(s).isFullyPaid).length;
 
                     return (
@@ -1100,6 +1104,16 @@ function GeneratorApp({onLock}:{onLock:()=>void}) {
                           </div>
                         </div>
 
+                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                          <div className="rounded-xl bg-slate-950/80 border border-slate-800 p-2.5">
+                            <span className="text-slate-400 block">المجموع الكلي</span>
+                            <strong className="text-amber-400 font-mono-numbers block mt-1 break-words">{cabinTotals.total.toLocaleString('ar-IQ')} د.ع</strong>
+                          </div>
+                          <div className="rounded-xl bg-slate-950/80 border border-slate-800 p-2.5">
+                            <span className="text-slate-400 block">المتبقي</span>
+                            <strong className="text-emerald-400 font-mono-numbers block mt-1 break-words">{cabinTotals.remaining.toLocaleString('ar-IQ')} د.ع</strong>
+                          </div>
+                        </div>
                         <div className="mt-2.5 pt-2 border-t border-slate-800/60 flex items-center justify-between text-[11px] text-slate-400">
 
                           

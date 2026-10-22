@@ -52,3 +52,15 @@ test('actual payment UI handlers retain full-payment receipt and correctly undo/
  assert.equal(d.transactions.length,1);assert.equal(financials(d,'s').remainingBalance,50000);
  run('').handleDeleteTransaction(d.transactions[0]);assert.equal(financials(d,'s').remainingBalance,100000);
 });
+
+test('card settlement requires confirmation, preserves history and clears the balance',()=>{
+ const source=readFileSync(new URL('../src/App.tsx',import.meta.url),'utf8');
+ const handler=source.slice(source.indexOf('  const settleAccount'),source.indexOf('  // Submit payment'));
+ const body=transformSync(handler+'\nreturn settleAccount;',{loader:'ts'}).code;
+ let d=issueMonth(fixture(),'2026-10');d.transactions=[receipt(25000)];d.subscribers[0].paidAmount=25000;
+ let accepted=false,calls=0;
+ const run=()=>new Function('data','financials','window','update','triggerToast',body)(d,financials,{confirm:()=>{calls++;return accepted;}},(fn:any)=>{d=fn(d);},()=>{})(d.subscribers[0]);
+ run();assert.equal(d.transactions.length,1);assert.equal(financials(d,'s').remainingBalance,75000);
+ accepted=true;run();assert.equal(d.transactions.length,2);assert.equal(d.transactions[0].amount,75000);assert.equal(financials(d,'s').remainingBalance,0);
+ run();assert.equal(d.transactions.length,2);assert.equal(calls,2);
+});

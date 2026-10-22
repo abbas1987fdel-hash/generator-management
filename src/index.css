@@ -26,3 +26,24 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(148, 163, 184, 0.4);
 }
+
+/* Light surfaces retain dark text on colored action buttons. */
+html[data-theme="light"] body { background:#f8fafc; color:#0f172a; }
+html[data-theme="light"] [class*="bg-slate-950"] { background-color:#f8fafc; }
+html[data-theme="light"] [class*="bg-slate-900"] { background-color:#ffffff; }
+html[data-theme="light"] [class*="bg-slate-800"] { background-color:#e2e8f0; }
+html[data-theme="light"] [class*="bg-slate-700"] { background-color:#cbd5e1; }
+html[data-theme="light"] .text-white,
+html[data-theme="light"] .text-slate-100,
+html[data-theme="light"] .text-slate-200 { color:#0f172a; }
+html[data-theme="light"] .text-slate-300,
+html[data-theme="light"] .text-slate-400,
+html[data-theme="light"] .text-slate-500 { color:#475569; }
+html[data-theme="light"] [class*="border-slate-"] { border-color:#cbd5e1; }
+html[data-theme="light"] .text-amber-300,
+html[data-theme="light"] .text-amber-400,
+html[data-theme="light"] .text-amber-200 { color:#92400e; }
+html[data-theme="light"] .text-emerald-400 { color:#047857; }
+html[data-theme="light"] .text-red-400 { color:#b91c1c; }
+html[data-theme="light"] input,html[data-theme="light"] textarea,html[data-theme="light"] select { color:#0f172a; }
+html[data-theme="light"] button[class*="bg-red-"],html[data-theme="light"] button[class*="bg-emerald-600"] { color:white; }
