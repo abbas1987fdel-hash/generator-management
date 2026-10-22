@@ -8,8 +8,6 @@ import {accessCode,validateCodeChange} from './access';
 import {whatsappAccountLink} from './whatsapp';
 import { useGeneratorData } from './cloud';
 import {StorageMeter} from './StorageMeter';
-import {CabinReports} from './CabinReports';
-import {CabinMessage} from './CabinMessage';
 import { currentMonth, financials, issueMonth } from './accounting';
 import { 
   Zap, 
@@ -106,8 +104,7 @@ function GeneratorApp({onLock}:{onLock:()=>void}) {
   };
   // 5. Navigation & Cabin Dashboard State (3 Tabs)
   const [activeCabinId, setActiveCabinId] = useState<string | null>(null);
-  const [cabinDashboardTab, setCabinDashboardTab] = useState<'overview' | 'customers' | 'overdue' | 'reports' | 'message'>('overview');
-  const [messageDrafts,setMessageDrafts]=useState<Record<string,string>>({});
+  const [cabinDashboardTab, setCabinDashboardTab] = useState<'overview' | 'customers' | 'overdue'>('overview');
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
 
   // 6. Customer Profile Modal State (ملف الزبون)
@@ -643,8 +640,6 @@ function GeneratorApp({onLock}:{onLock:()=>void}) {
 
             {/* --- 3 Tabs Bar (الرئيسية / الزبائن / المتأخرون) --- */}
             <div className="bg-slate-900/80 p-1 rounded-2xl border border-slate-800 flex items-center gap-1">
-            <button onClick={()=>setCabinDashboardTab('message')} className={cabinDashboardTab==='message'?'flex-1 rounded-xl py-2 px-1 text-xs bg-emerald-600 text-white font-bold':'flex-1 rounded-xl py-2 px-1 text-xs text-slate-300 font-bold'}>رسالة عامة</button>
-            <button onClick={()=>setCabinDashboardTab('reports')} className={cabinDashboardTab==='reports'?'flex-1 rounded-xl py-2 px-1 text-xs bg-amber-500 text-slate-950 font-bold':'flex-1 rounded-xl py-2 px-1 text-xs bg-slate-800 text-slate-100 font-bold'}>التقارير</button>
               <button
                 onClick={() => setCabinDashboardTab('overview')}
                 className={`flex-1 py-2 px-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
@@ -694,8 +689,6 @@ function GeneratorApp({onLock}:{onLock:()=>void}) {
               </button>
             </div>
 
-            {cabinDashboardTab === 'message' && <CabinMessage name={activeCabin.name} message={messageDrafts[activeCabin.id]??''} onChange={text=>setMessageDrafts(previous=>({...previous,[activeCabin.id]:text}))}/>}
-            {cabinDashboardTab === 'reports' && <CabinReports cabinId={activeCabin.id}/>}
             {/* TAB 1: OVERVIEW */}
             {cabinDashboardTab === 'overview' && (
               <motion.div
