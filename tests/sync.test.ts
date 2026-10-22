@@ -49,3 +49,35 @@ test('failed local persistence never sends the edit to the cloud',async()=>{
 test('first offline visit stays empty instead of creating a fake cloud account',async()=>{
  const h=harness();h.online=false;const e=h.create();await e.start();assert.equal(e.value,null);assert.equal(h.reads,0);assert.equal(h.writes,0);
 });
+
+test('Firestore key ordering does not cause a false subscriber conflict',()=>{
+ const base=fixture(),local=clone(base);
+ local.transactions.push({id:'receipt',customerId:'s',amount:25000,date:'2026-10-22',time:'12:00'});
+ local.subscribers[0].paidAmount=25000;
+ const reorder=(v:any):any=>Array.isArray(v)?v.map(reorder):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).reverse().map(([k,x])=>[k,reorder(x)])):v;
+ const remote=reorder(base);remote.settings.pricePerAmpere=11000;
+ const result=mergeLedger(base,local,remote);
+ assert.equal(result.transactions.length,1);assert.equal(result.settings.pricePerAmpere,11000);
+ assert.equal(financials(result,'s').remainingBalance,75000);
+});
+test('two independent receipts for the same subscriber merge once, including retry',()=>{
+ const base=fixture(),local=clone(base),remote=clone(base);
+ local.transactions.push({id:'a',customerId:'s',amount:25000,date:'2026-10-22',time:'12:00'});local.subscribers[0].paidAmount=25000;
+ remote.transactions.push({id:'b',customerId:'s',amount:35000,date:'2026-10-22',time:'12:01'});remote.subscribers[0].paidAmount=35000;
+ const merged=mergeLedger(base,local,remote);
+ assert.equal(merged.transactions.length,2);assert.equal(merged.subscribers[0].paidAmount,60000);
+ assert.equal(financials(merged,'s').remainingBalance,40000);
+ assert.deepEqual(mergeLedger(base,local,merged),merged);
+});
+test('different operators in different cabins keep both receipts',()=>{
+ const base=fixture();base.cabins.push({...base.cabins[0],id:'c2'});base.subscribers.push({...base.subscribers[0],id:'s2',cabinId:'c2'});
+ const local=clone(base),remote=clone(base);
+ local.transactions.push({id:'a',customerId:'s',amount:100,date:'2026-10-22',time:'12:00'});local.subscribers[0].paidAmount=100;
+ remote.transactions.push({id:'b',customerId:'s2',amount:200,date:'2026-10-22',time:'12:00'});remote.subscribers[1].paidAmount=200;
+ const result=mergeLedger(base,local,remote);assert.equal(result.transactions.length,2);assert.deepEqual(result.subscribers.map(s=>s.paidAmount),[100,200]);
+});
+test('concurrent different edits of the same receipt still require resolution',()=>{
+ const base=fixture();base.transactions.push({id:'a',customerId:'s',amount:100,date:'2026-10-22',time:'12:00'});
+ const local=clone(base),remote=clone(base);local.transactions[0].amount=200;remote.transactions[0].amount=300;
+ assert.throws(()=>mergeLedger(base,local,remote),ConflictError);
+});

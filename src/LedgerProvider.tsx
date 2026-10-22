@@ -30,7 +30,7 @@ export function LedgerProvider({engine,lockName,children}:{engine:SyncEngine;loc
   const data=engine.value?.data;
   const blocked=engine.localSaving||engine.busy||!!engine.error||engine.conflict;
   const button='rounded-xl bg-amber-400 text-slate-950 px-4 py-2 font-bold text-sm';
-  return <PwaShell canUpdate={!blocked}>
+  return <PwaShell canUpdate={!engine.localSaving&&!engine.busy&&!engine.error}>
     {!owner||!data?<main dir="rtl" className="min-h-screen bg-slate-950 text-slate-100 grid place-items-center p-6"><section className="text-center space-y-4"><img src={import.meta.env.BASE_URL+'icon-192.png'} className="w-24 rounded-2xl mx-auto" alt="شعار حسن الجنابي"/><h1 className="text-xl font-bold">مولدة حسن كريم كاظم</h1><p>{engine.error||(!owner?'النظام مفتوح بتبويبة أخرى. أغلقها للمتابعة هنا.':engine.status)}</p>{owner&&<button className={button} onClick={()=>void engine.sync()}>إعادة المحاولة</button>}</section></main>:
     <Context.Provider value={{data,change,update}}>
       <div dir="rtl" className="bg-slate-900 text-xs p-2 flex flex-wrap items-center justify-between gap-2 text-slate-300"><span>{engine.localSaving?'جارٍ الحفظ على الجهاز…':!online?'أوفلاين — محفوظ على الجهاز'+(isPending(engine.value!)?'، توجد تعديلات تنتظر المزامنة':''):engine.status}</span><button disabled={blocked||!online} className="underline disabled:opacity-40" onClick={()=>void engine.sync()}>مزامنة الآن</button></div>

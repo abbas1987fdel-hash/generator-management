@@ -4,7 +4,9 @@ export interface LocalLedger {format:1;base:GeneratorData;data:GeneratorData;rev
 export interface LedgerStore {load():Promise<LocalLedger|null>;save(value:LocalLedger):Promise<void>}
 export interface LedgerRemote {read():Promise<RemoteRow>;commit(value:LocalLedger):Promise<RemoteRow>}
 export class ConflictError extends Error {constructor(){super('تعارض تعديل مع جهاز آخر. نسختك المحلية محفوظة ولم تُستبدل البيانات السحابية.');}}
-const equal=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
+// Firestore may return map keys in a different order from local objects.
+const canonical=(value:any):any=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
+const equal=(a:unknown,b:unknown)=>JSON.stringify(canonical(a))===JSON.stringify(canonical(b));
 export const isPending=(value:LocalLedger)=>!equal(value.base,value.data);
 // Conservative three-way merge. Never choose a winner for concurrently edited
 // records, or merge a historical cleanup into another device's accounting work.
@@ -17,7 +19,10 @@ export function mergeLedger(base:GeneratorData,local:GeneratorData,remote:Genera
     const ids=new Set([...r,...l,...b].map(x=>x.id));
     return [...ids].map(id=>pick(b.find(x=>x.id===id),l.find(x=>x.id===id),r.find(x=>x.id===id))).filter(x=>x!==undefined);
   };
-  const next={...remote,settings:pick(base.settings,local.settings,remote.settings),openingCredits:pick(base.openingCredits,local.openingCredits,remote.openingCredits),cabins:records(base.cabins,local.cabins,remote.cabins),subscribers:records(base.subscribers,local.subscribers,remote.subscribers),invoices:records(base.invoices,local.invoices,remote.invoices),transactions:records(base.transactions,local.transactions,remote.transactions)} as GeneratorData;
+  // paidAmount is a legacy cached total; receipts and opening credit are authoritative.
+  const subscriberFields=(items:GeneratorData['subscribers'])=>items.map(({paidAmount,...fields})=>fields);
+  const next={...remote,settings:pick(base.settings,local.settings,remote.settings),openingCredits:pick(base.openingCredits,local.openingCredits,remote.openingCredits),cabins:records(base.cabins,local.cabins,remote.cabins),subscribers:records(subscriberFields(base.subscribers),subscriberFields(local.subscribers),subscriberFields(remote.subscribers)),invoices:records(base.invoices,local.invoices,remote.invoices),transactions:records(base.transactions,local.transactions,remote.transactions)} as GeneratorData;
+  next.subscribers=next.subscribers.map(s=>({...s,paidAmount:(next.openingCredits[s.id]??0)+next.transactions.filter(t=>t.customerId===s.id).reduce((sum,t)=>sum+t.amount,0)}));
   // Identical invoice IDs must remain unique; orphaned history must never be
   // introduced by merging a deletion with a concurrent payment.
   const subscribers=new Set(next.subscribers.map(s=>s.id));
