@@ -744,16 +744,6 @@ function GeneratorApp({onLock}:{onLock:()=>void}) {
                   </div>
                 </div>
 
-                <button
-                  onClick={() => setCabinDashboardTab('customers')}
-                  className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-300 text-xs font-semibold flex items-center justify-between transition-colors"
-                >
-                  <span className="flex items-center gap-2">
-                    <Users className="w-4 h-4 text-amber-400" />
-                    <span>عرض قائمة الزبائن وإدارة الوصولات</span>
-                  </span>
-                  <ChevronLeft className="w-4 h-4 text-slate-500" />
-                </button>
               </motion.div>
             )}
 
