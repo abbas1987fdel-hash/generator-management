@@ -4,9 +4,12 @@
  */
 
 import React, { useState } from 'react';
+import {accessCode,validateCodeChange} from './access';
+import {whatsappAccountLink} from './whatsapp';
 import { useGeneratorData } from './cloud';
 import {StorageMeter} from './StorageMeter';
 import {CabinReports} from './CabinReports';
+import {CabinMessage} from './CabinMessage';
 import { currentMonth, financials, issueMonth } from './accounting';
 import { 
   Zap, 
@@ -51,6 +54,7 @@ export interface GeneratorSettings {
   totalCapacityAmps: number;
   pricePerAmpere: number;
   secretBackdoorCode: string;
+  loginCode?: string;
 }
 
 // Cabin Model Interface (With Password Protection)
@@ -83,7 +87,7 @@ export interface Subscriber {
   paidAmount: number; // Sum of partial/full payments
 }
 
-export default function App() {
+function GeneratorApp({onLock}:{onLock:()=>void}) {
   const {data, change, update} = useGeneratorData();
   const {settings, cabins, subscribers, transactions} = data;
   const setSettings = (value: React.SetStateAction<GeneratorSettings>) => change('settings', value);
@@ -102,7 +106,8 @@ export default function App() {
   };
   // 5. Navigation & Cabin Dashboard State (3 Tabs)
   const [activeCabinId, setActiveCabinId] = useState<string | null>(null);
-  const [cabinDashboardTab, setCabinDashboardTab] = useState<'overview' | 'customers' | 'overdue' | 'reports'>('overview');
+  const [cabinDashboardTab, setCabinDashboardTab] = useState<'overview' | 'customers' | 'overdue' | 'reports' | 'message'>('overview');
+  const [messageDrafts,setMessageDrafts]=useState<Record<string,string>>({});
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
 
   // 6. Customer Profile Modal State (ملف الزبون)
@@ -123,18 +128,18 @@ export default function App() {
   const [editInputAmount, setEditInputAmount] = useState<string>('');
 
   // 9. Hidden Backdoor State (1001)
-  const [backdoorInput, setBackdoorInput] = useState('');
+  const [oldCode,setOldCode]=useState('');
+  const [newCode,setNewCode]=useState('');
+  const [confirmCode,setConfirmCode]=useState('');
+  const [settingsError,setSettingsError]=useState('');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [modalForm, setModalForm] = useState<GeneratorSettings>(settings);
-  const [showSecretCode, setShowSecretCode] = useState(false);
 
   // 10. Add Cabin State (Including Password)
   const [isAddCabinOpen, setIsAddCabinOpen] = useState(false);
   const [newCabinName, setNewCabinName] = useState('');
   const [newCabinManager, setNewCabinManager] = useState('');
   const [newCabinCapacity, setNewCabinCapacity] = useState<string>('');
-  const [newCabinPassword, setNewCabinPassword] = useState('');
-  const [showNewCabinPassword, setShowNewCabinPassword] = useState(false);
   const [cabinSearchQuery, setCabinSearchQuery] = useState('');
 
   // 10.1 Edit & Delete Cabin from inside Settings
@@ -142,15 +147,9 @@ export default function App() {
   const [editCabinName, setEditCabinName] = useState('');
   const [editCabinManager, setEditCabinManager] = useState('');
   const [editCabinCapacity, setEditCabinCapacity] = useState('');
-  const [editCabinPassword, setEditCabinPassword] = useState('');
-  const [showEditCabinPassword, setShowEditCabinPassword] = useState(false);
   const [cabinToDelete, setCabinToDelete] = useState<Cabin | null>(null);
 
   // 11. Cabin Password Authentication Prompt State (قفل حماية الكابينات)
-  const [authenticatingCabin, setAuthenticatingCabin] = useState<Cabin | null>(null);
-  const [enteredCabinPassword, setEnteredCabinPassword] = useState('');
-  const [cabinAuthError, setCabinAuthError] = useState(false);
-  const [showEnteredCabinPassword, setShowEnteredCabinPassword] = useState(false);
 
   // 12. Add Subscriber Modal inside Cabin
   const [isAddSubOpen, setIsAddSubOpen] = useState(false);
@@ -161,7 +160,6 @@ export default function App() {
 
   // 12. General UI State
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [showBackdoorHint, setShowBackdoorHint] = useState(false);
 
   // Trigger floating toast feedback
   const triggerToast = (msg: string) => {
@@ -171,26 +169,17 @@ export default function App() {
     }, 3200);
   };
 
-  // Hidden backdoor key listener
-  const handleBackdoorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setBackdoorInput(val);
-
-    if (val.trim() === settings.secretBackdoorCode.trim()) {
-      setModalForm({ ...settings });
-      setIsSettingsOpen(true);
-      setBackdoorInput(''); // stealth clear
-    }
-  };
-
   // Save admin settings
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
-    if (modalForm.totalCapacityAmps <= 0) return;
-    if (modalForm.pricePerAmpere < 0) return;
-    if (!modalForm.secretBackdoorCode.trim()) return;
+    if (!Number.isFinite(modalForm.totalCapacityAmps) || modalForm.totalCapacityAmps < 0) return;
+    if (!Number.isFinite(modalForm.pricePerAmpere) || modalForm.pricePerAmpere < 0) return;
+    const codeError=validateCodeChange(settings,oldCode,newCode,confirmCode);
+    if(codeError){setSettingsError(codeError);return;}
 
     setSettings({
+      ...settings,
+      loginCode:newCode || accessCode(settings),
       totalCapacityAmps: Number(modalForm.totalCapacityAmps),
       pricePerAmpere: Number(modalForm.pricePerAmpere),
       secretBackdoorCode: modalForm.secretBackdoorCode.trim(),
@@ -226,7 +215,7 @@ export default function App() {
     const dateStr = now.toISOString().split('T')[0];
 
     const newTx: Transaction = {
-      id: 'tx-' + Date.now(),
+      id: 'tx-' + crypto.randomUUID(),
       customerId: currentSub.id,
       amount: effectivePayment,
       date: dateStr,
@@ -345,7 +334,7 @@ export default function App() {
             ...s,
             name: trimmedName,
             amps: parsedAmps,
-            phone: editCustomerPhone.trim() || '9647700000000',
+            phone: editCustomerPhone.trim(),
             roomOrHouse: editCustomerAddress.trim() || 'بدون تفاصيل إضافية',
           };
         }
@@ -385,11 +374,11 @@ export default function App() {
     }
 
     const newSub: Subscriber = {
-      id: 'sub-' + Date.now(),
+      id: 'sub-' + crypto.randomUUID(),
       cabinId: activeCabinId,
       name: trimmedName,
       amps: parsedAmps,
-      phone: newSubPhone.trim() || '9647700000000',
+      phone: newSubPhone.trim(),
       roomOrHouse: newSubAddress.trim() || 'بدون تفاصيل إضافية',
       paidAmount: 0, // Unpaid by default
     };
@@ -412,24 +401,20 @@ export default function App() {
     const trimmedName = newCabinName.trim();
     const trimmedManager = newCabinManager.trim();
     const parsedCapacity = Number(newCabinCapacity);
-    const trimmedPassword = newCabinPassword.trim();
+
 
     if (!trimmedName || !trimmedManager || !parsedCapacity) {
       triggerToast('يرجى ملء جميع الحقول بصورة صحيحة');
       return;
     }
 
-    if (!trimmedPassword) {
-      triggerToast('يرجى تحديد كلمة مرور لحماية الكابينة');
-      return;
-    }
 
     const newCabin: Cabin = {
-      id: 'cab-' + Date.now(),
+      id: 'cab-' + crypto.randomUUID(),
       name: trimmedName,
       managerName: trimmedManager,
       capacityAmps: parsedCapacity,
-      password: trimmedPassword,
+
       createdAt: new Date().toISOString().split('T')[0],
     };
 
@@ -437,20 +422,17 @@ export default function App() {
     setNewCabinName('');
     setNewCabinManager('');
     setNewCabinCapacity('');
-    setNewCabinPassword('');
-    setShowNewCabinPassword(false);
     setIsAddCabinOpen(false);
-    triggerToast(`تمت إضافة ${trimmedName} وتعيين كلمة المرور بنجاح`);
+    triggerToast(`تمت إضافة ${trimmedName} بنجاح`);
   };
 
   // Start editing cabin from Settings
   const handleStartEditCabin = (cabin: Cabin) => {
+    setIsSettingsOpen(false);
     setEditingCabin(cabin);
     setEditCabinName(cabin.name);
     setEditCabinManager(cabin.managerName);
     setEditCabinCapacity(String(cabin.capacityAmps));
-    setEditCabinPassword(cabin.password || '');
-    setShowEditCabinPassword(false);
   };
 
   // Save edited cabin
@@ -460,17 +442,13 @@ export default function App() {
     const trimmedName = editCabinName.trim();
     const trimmedManager = editCabinManager.trim();
     const parsedCapacity = Number(editCabinCapacity);
-    const trimmedPassword = editCabinPassword.trim();
+
 
     if (!trimmedName || !trimmedManager || !parsedCapacity || parsedCapacity <= 0) {
       triggerToast('يرجى التأكد من اسم الكابينة وسعتها');
       return;
     }
 
-    if (!trimmedPassword) {
-      triggerToast('يرجى إدخال كلمة مرور للكابينة');
-      return;
-    }
 
     setCabins((prev) =>
       prev.map((c) => {
@@ -480,7 +458,7 @@ export default function App() {
             name: trimmedName,
             managerName: trimmedManager,
             capacityAmps: parsedCapacity,
-            password: trimmedPassword,
+
           };
         }
         return c;
@@ -532,10 +510,6 @@ export default function App() {
   );
 
   // Cabin drawn load calculations
-  const totalDrawnAmps = activeCabinSubscribers.reduce((sum, s) => sum + s.amps, 0);
-  const cabinCapacity = activeCabin?.capacityAmps || 100;
-  const loadPercentage = Math.round((totalDrawnAmps / cabinCapacity) * 100);
-  const isHighLoad = loadPercentage >= 85;
 
   // Financials for this cabin
   const collectedCabinRevenue = activeCabinSubscribers.reduce((sum, s) => {
@@ -552,18 +526,17 @@ export default function App() {
   const remainingGenAmps = Math.max(0, settings.totalCapacityAmps - totalAllocatedAmps);
 
   // SVG Animated Donut Parameters
-  const radius = 54;
-  const circumference = 2 * Math.PI * radius;
-  const strokeOffset = circumference - (Math.min(100, loadPercentage) / 100) * circumference;
 
-  // Build WhatsApp Reminder Link
-  const buildWhatsAppLink = (sub: Subscriber) => {
-    const rawPhone = sub.phone.replace(/[^0-9]/g, '');
-    const { remainingBalance } = getCustomerFinancials(sub);
-    const amountDue = remainingBalance.toLocaleString('ar-IQ');
-    const msg = `السلام عليكم أخي الكريم ${sub.name}، نود تذكيركم بضرورة تسديد متبقي اشتراك المولدة للشهر الحالي عن (${sub.amps} أمبير) - المبلغ المتبقي: ${amountDue} د.ع لكابينة (${activeCabin?.name || ''}). شاكرين تعاونكم معنا.`;
-    return `https://wa.me/${rawPhone}?text=${encodeURIComponent(msg)}`;
+  const buildWhatsAppLink = (sub:Subscriber) => {
+    const f=getCustomerFinancials(sub);
+    return whatsappAccountLink(sub.phone,sub.name,cabins.find(c=>c.id===sub.cabinId)?.name??'',f.totalDue,f.effectivePaid,f.remainingBalance);
   };
+  const whatsappButton = (sub:Subscriber) => {
+    const link=buildWhatsAppLink(sub);
+    return <button type="button" onClick={e=>{e.stopPropagation();if(link)window.open(link,'_blank','noopener,noreferrer');else triggerToast('أضف رقم هاتف صحيح للمشترك أولًا');}} className="rounded-xl bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 p-2 text-xs flex items-center justify-center gap-2"><MessageCircle className="w-4 h-4"/>واتساب المشترك</button>;
+  };
+  const accountTotals = (list:Subscriber[]) => list.reduce((sum,sub)=>{const f=getCustomerFinancials(sub);return {total:sum.total+f.totalDue,paid:sum.paid+f.effectivePaid,remaining:sum.remaining+f.remainingBalance};},{total:0,paid:0,remaining:0});
+  const totals=accountTotals(activeCabin?activeCabinSubscribers:subscribers);
 
   // Lookup for currently viewed customer profile
   const activeCustomer = subscribers.find((s) => s.id === activeProfileCustomerId) || null;
@@ -615,12 +588,12 @@ export default function App() {
               </button>
             ) : (
               <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center text-slate-950 shadow-md shadow-amber-500/20">
-                <Zap className="w-5 h-5 fill-slate-950 stroke-slate-950" />
+                <img src={import.meta.env.BASE_URL+'icon-192.png'} alt="شعار حسن الجنابي" className="w-9 h-9 rounded-xl"/>
               </div>
             )}
 
             <div>
-              <h1 className="text-sm font-bold text-slate-100 leading-tight truncate max-w-[170px]">
+              <h1 className="text-sm font-bold text-slate-100 leading-relaxed break-words whitespace-normal">
                 {activeCabin ? activeCabin.name : 'مولدة حسن كريم كاظم'}
               </h1>
               <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
@@ -630,70 +603,17 @@ export default function App() {
             </div>
           </div>
 
-          {/* Right Section: Stealth Backdoor Input (1001) & Help Guide */}
-          <div className="flex items-center gap-2">
-            <div className="relative flex items-center" title="مدخل الإدارة السري">
-              <input
-                type="password"
-                inputMode="numeric"
-                maxLength={8}
-                value={backdoorInput}
-                onChange={handleBackdoorChange}
-                aria-label="Backdoor"
-                className={`w-9 h-7 text-center text-xs tracking-widest font-mono-numbers bg-slate-950/40 hover:bg-slate-950/80 focus:bg-slate-950 rounded-md border text-slate-400 focus:text-amber-400 focus:outline-none transition-all duration-200 ${
-                  showBackdoorHint 
-                    ? 'border-amber-500 ring-2 ring-amber-500/30 bg-amber-500/10 text-amber-300' 
-                    : 'border-slate-800/60 focus:border-amber-500/50'
-                }`}
-              />
-            </div>
-
-            <button
-              onClick={() => setShowBackdoorHint(!showBackdoorHint)}
-              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800/60 transition-colors"
-              aria-label="دليل الرمز السري"
-            >
-              <HelpCircle className="w-4 h-4" />
-            </button>
+          <div className="flex gap-1 shrink-0">
+            <button aria-label="الإعدادات الرئيسية" className="p-2 rounded-xl bg-slate-800" onClick={()=>{setModalForm({...settings});setOldCode('');setNewCode('');setConfirmCode('');setSettingsError('');setIsSettingsOpen(true);}}><Sliders className="w-5 h-5"/></button>
+            <button aria-label="قفل النظام" className="p-2 rounded-xl bg-slate-800" onClick={onLock}><Lock className="w-5 h-5"/></button>
           </div>
         </header>
-
-        {/* Backdoor Helper Drawer */}
-        <AnimatePresence>
-          {showBackdoorHint && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              className="overflow-hidden bg-amber-500/10 border-b border-amber-500/20 px-4 py-2.5 text-xs text-amber-200"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="space-y-1">
-                  <div className="font-semibold flex items-center gap-1.5 text-amber-300">
-                    <KeyRound className="w-3.5 h-3.5" />
-                    <span>المدخل السري (Stealth Backdoor):</span>
-                  </div>
-                  <p className="text-[11px] leading-relaxed text-amber-200/80">
-                    اكتب الرمز السري في الحقل الصغير بالأعلى 
-                    <span className="font-mono-numbers font-bold bg-amber-500/20 px-1.5 py-0.5 rounded mx-1 text-amber-300">
-                      {settings.secretBackdoorCode}
-                    </span>
-                    لتعديل سعر الأمبير والسعة ورمز الدخول المخفي!
-                  </p>
-                </div>
-                <button 
-                  onClick={() => {
-                    setModalForm({ ...settings });
-                    setIsSettingsOpen(true);
-                  }}
-                  className="shrink-0 px-2.5 py-1 text-[10px] font-bold bg-amber-500 text-slate-950 rounded-md hover:bg-amber-400 transition-colors"
-                >
-                  فتح الإعدادات
-                </button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <section dir="rtl" className="m-4 p-4 rounded-2xl border border-amber-500/30 bg-slate-900 space-y-2">
+          <h2 className="text-sm font-bold">المجموع الكلي للحساب — {activeCabin?'الكابينة':'جميع الكابينات'}</h2>
+          <p className="text-2xl font-bold text-amber-400">{totals.total.toLocaleString('ar-IQ')} د.ع</p>
+          <p className="text-xs text-slate-300">المسدد: {totals.paid.toLocaleString('ar-IQ')} · المتبقي: {totals.remaining.toLocaleString('ar-IQ')} د.ع</p>
+          <p className="text-[10px] text-slate-500">حسب الفواتير والسجلات المحفوظة في النظام</p>
+        </section>
 
         {/* ============================================================ */}
         {/* VIEW 1: CABIN DASHBOARD (لوحة تحكم الكابينة عند الاختيار)   */}
@@ -718,16 +638,12 @@ export default function App() {
                 </p>
               </div>
 
-              <div className="text-left bg-slate-950/70 border border-slate-800 px-3 py-1.5 rounded-xl">
-                <span className="text-xs font-mono-numbers font-bold text-amber-400 block">
-                  {activeCabin.capacityAmps} A
-                </span>
-                <span className="text-[9px] text-slate-400 block">سعة الكابينة</span>
-              </div>
+
             </div>
 
             {/* --- 3 Tabs Bar (الرئيسية / الزبائن / المتأخرون) --- */}
             <div className="bg-slate-900/80 p-1 rounded-2xl border border-slate-800 flex items-center gap-1">
+            <button onClick={()=>setCabinDashboardTab('message')} className={cabinDashboardTab==='message'?'flex-1 rounded-xl py-2 px-1 text-xs bg-emerald-600 text-white font-bold':'flex-1 rounded-xl py-2 px-1 text-xs text-slate-300 font-bold'}>رسالة عامة</button>
             <button onClick={()=>setCabinDashboardTab('reports')} className={cabinDashboardTab==='reports'?'flex-1 rounded-xl py-2 px-1 text-xs bg-amber-500 text-slate-950 font-bold':'flex-1 rounded-xl py-2 px-1 text-xs bg-slate-800 text-slate-100 font-bold'}>التقارير</button>
               <button
                 onClick={() => setCabinDashboardTab('overview')}
@@ -778,6 +694,7 @@ export default function App() {
               </button>
             </div>
 
+            {cabinDashboardTab === 'message' && <CabinMessage name={activeCabin.name} message={messageDrafts[activeCabin.id]??''} onChange={text=>setMessageDrafts(previous=>({...previous,[activeCabin.id]:text}))}/>}
             {cabinDashboardTab === 'reports' && <CabinReports cabinId={activeCabin.id}/>}
             {/* TAB 1: OVERVIEW */}
             {cabinDashboardTab === 'overview' && (
@@ -789,62 +706,6 @@ export default function App() {
                 transition={{ duration: 0.18 }}
                 className="space-y-4"
               >
-                {/* Donut Chart */}
-                <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-5 flex flex-col items-center justify-center relative overflow-hidden">
-                  {isHighLoad && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -5 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="w-full bg-rose-500/15 border border-rose-500/30 text-rose-300 px-3 py-1.5 rounded-xl text-[11px] font-semibold flex items-center justify-center gap-1.5 mb-3"
-                    >
-                      <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
-                      <span>تنبيه: الكابينة تجاوزت 85% من سعتها المحددة!</span>
-                    </motion.div>
-                  )}
-
-                  <div className="relative w-40 h-40 flex items-center justify-center my-2">
-                    <svg className="w-full h-full -rotate-90 transform" viewBox="0 0 130 130">
-                      <circle
-                        cx="65"
-                        cy="65"
-                        r={radius}
-                        className="stroke-slate-800"
-                        strokeWidth="11"
-                        fill="transparent"
-                      />
-                      <motion.circle
-                        cx="65"
-                        cy="65"
-                        r={radius}
-                        stroke={isHighLoad ? '#f43f5e' : '#f59e0b'}
-                        strokeWidth="11"
-                        strokeDasharray={circumference}
-                        initial={{ strokeDashoffset: circumference }}
-                        animate={{ strokeDashoffset: strokeOffset }}
-                        transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
-                        strokeLinecap="round"
-                        fill="transparent"
-                      />
-                    </svg>
-
-                    <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                      <span className={`text-3xl font-extrabold font-mono-numbers ${isHighLoad ? 'text-rose-400' : 'text-amber-400'}`}>
-                        {loadPercentage}%
-                      </span>
-                      <span className="text-[11px] text-slate-300 font-semibold font-mono-numbers">
-                        {totalDrawnAmps} / {cabinCapacity} A
-                      </span>
-                      <span className="text-[10px] text-slate-400 mt-0.5">
-                        أمبير مسحوب
-                      </span>
-                    </div>
-                  </div>
-
-                  <p className="text-xs text-slate-400 text-center max-w-xs mt-1">
-                    المتبقي من سعة الكابينة: <span className="font-mono-numbers font-bold text-emerald-400">{Math.max(0, cabinCapacity - totalDrawnAmps)} أمبير</span>
-                  </p>
-                </div>
-
                 {/* Micro Stat Metric Cards */}
                 <div className="grid grid-cols-3 gap-2.5">
                   <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-3 text-center flex flex-col justify-between">
@@ -973,10 +834,10 @@ export default function App() {
                           onClick={() => setActiveProfileCustomerId(sub.id)}
                           className="group bg-slate-900/80 hover:bg-slate-900 active:bg-slate-850 border border-slate-800/80 hover:border-slate-700 rounded-2xl p-3.5 transition-all duration-150 cursor-pointer shadow-sm relative overflow-hidden"
                         >
-                          <div className="flex items-center justify-between gap-3">
+                          <div className="flex flex-col gap-3">
                             <div className="space-y-1 min-w-0 flex-1">
                               <div className="flex items-center gap-2">
-                                <h4 className="text-sm font-bold text-slate-100 truncate group-hover:text-amber-400 transition-colors">
+                                <h4 className="text-sm font-bold text-slate-100 break-words whitespace-normal group-hover:text-amber-400 transition-colors">
                                   {sub.name}
                                 </h4>
                                 <span className={`text-[10px] px-2 py-0.5 rounded-md font-semibold shrink-0 ${
@@ -997,13 +858,14 @@ export default function App() {
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-2 shrink-0">
+                            <div className="flex items-center justify-between gap-2">
+                              {whatsappButton(sub)}
                               <div className="text-left bg-slate-950/80 px-2.5 py-1.5 rounded-xl border border-slate-800">
                                 <span className="text-xs font-bold font-mono-numbers text-emerald-400 block">
                                   {totalDue.toLocaleString('ar-IQ')} د.ع
                                 </span>
                                 <span className="text-[9px] text-slate-400 block">
-                                  المستحق شهرياً
+                                  مجموع الفواتير
                                 </span>
                               </div>
 
@@ -1094,7 +956,7 @@ export default function App() {
 
                           <div className="flex items-center gap-2 pt-1 border-t border-slate-800/80">
                             <a
-                              href={buildWhatsAppLink(sub)}
+                              href={buildWhatsAppLink(sub) ?? undefined} onClick={e=>{if(!buildWhatsAppLink(sub)){e.preventDefault();triggerToast('أضف رقم هاتف صحيح للمشترك أولًا');}}}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="flex-1 py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 active:scale-[0.98] transition-all"
@@ -1203,7 +1065,6 @@ export default function App() {
                   )
                   .map((cabin) => {
                     const cabinSubs = subscribers.filter((s) => s.cabinId === cabin.id);
-                    const cabinDrawn = cabinSubs.reduce((acc, s) => acc + s.amps, 0);
                     const cabinOverdueCount = cabinSubs.filter((s) => !getCustomerFinancials(s).isFullyPaid).length;
 
                     return (
@@ -1213,17 +1074,8 @@ export default function App() {
                         initial={{ opacity: 0, y: 15 }}
                         animate={{ opacity: 1, y: 0 }}
                         onClick={() => {
-                          if (cabin.password) {
-                            setAuthenticatingCabin(cabin);
-                            setEnteredCabinPassword('');
-                            setCabinAuthError(false);
-                            setShowEnteredCabinPassword(false);
-                          } else {
-                            setActiveCabinId(cabin.id);
-                            setCabinDashboardTab('overview');
-                            setCustomerSearchQuery('');
-                            setActiveProfileCustomerId(null);
-                          }
+                          setActiveCabinId(cabin.id);
+                          setCabinDashboardTab('overview');setCustomerSearchQuery('');setActiveProfileCustomerId(null);
                         }}
                         className="group bg-slate-900/70 hover:bg-slate-900 active:bg-slate-850 border border-slate-800/80 hover:border-slate-700 rounded-2xl p-4 transition-all duration-150 cursor-pointer shadow-sm relative overflow-hidden"
                       >
@@ -1238,12 +1090,7 @@ export default function App() {
                                 <h3 className="text-sm font-bold text-slate-100 truncate group-hover:text-amber-400 transition-colors">
                                   {cabin.name}
                                 </h3>
-                                {cabin.password && (
-                                  <span className="flex items-center gap-1 text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded-md border border-amber-500/20 shrink-0">
-                                    <Lock className="w-2.5 h-2.5" />
-                                    <span>محمية</span>
-                                  </span>
-                                )}
+
                               </div>
 
                               <div className="flex items-center gap-1.5 text-xs text-slate-400">
@@ -1254,15 +1101,6 @@ export default function App() {
                           </div>
 
                           <div className="flex items-center gap-2.5 shrink-0">
-                            <div className="text-left bg-slate-950/70 px-2.5 py-1 rounded-xl border border-slate-800">
-                              <span className="text-xs font-bold font-mono-numbers text-amber-400 block">
-                                {cabin.capacityAmps} A
-                              </span>
-                              <span className="text-[9px] text-slate-400 block">
-                                سعة الكابينة
-                              </span>
-                            </div>
-
                             <div className="w-8 h-8 rounded-full bg-slate-800/60 flex items-center justify-center text-slate-400 group-hover:text-amber-400 group-hover:bg-amber-500/10 transition-colors">
                               <ChevronLeft className="w-4 h-4 stroke-[2.5]" />
                             </div>
@@ -1270,10 +1108,7 @@ export default function App() {
                         </div>
 
                         <div className="mt-2.5 pt-2 border-t border-slate-800/60 flex items-center justify-between text-[11px] text-slate-400">
-                          <span className="flex items-center gap-1">
-                            <span className="font-mono-numbers text-slate-300 font-semibold">{cabinDrawn} A</span>
-                            <span>مسحوب من أصل {cabin.capacityAmps} A</span>
-                          </span>
+
                           
                           {cabinOverdueCount > 0 ? (
                             <span className="text-rose-400 font-semibold font-mono-numbers">
@@ -1377,6 +1212,7 @@ export default function App() {
                     </div>
                   </div>
 
+                  {whatsappButton(activeCustomer)}
                   {/* Central Financial Screen (المبلغ الباقي / الديون) */}
                   <div className={`p-5 rounded-3xl border text-center relative overflow-hidden transition-all ${
                     activeCustomerFinancials.isFullyPaid
@@ -2043,39 +1879,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Field 4: Cabin Password Field (حقل كلمة المرور لمنع الفتح غير المصرح به) */}
-                  <div className="space-y-1.5 pt-1 border-t border-slate-800/80">
-                    <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
-                      <span className="flex items-center gap-1.5">
-                        <Lock className="w-4 h-4 text-amber-400" />
-                        كلمة المرور للكابينة
-                      </span>
-                      <span className="text-[10px] text-amber-400/80 font-medium">مطلوب للحماية</span>
-                    </label>
-                    <div className="relative flex items-center">
-                      <input
-                        type={showNewCabinPassword ? "text" : "password"}
-                        required
-                        value={newCabinPassword}
-                        onChange={(e) => setNewCabinPassword(e.target.value)}
-                        placeholder="أدخل رمز مرور للكابينة (مثال: 1234)"
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm font-mono-numbers text-slate-100 placeholder-slate-600 focus:outline-none focus:border-amber-500 transition-colors text-left pl-10"
-                        dir="ltr"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowNewCabinPassword(!showNewCabinPassword)}
-                        className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
-                        aria-label="إظهار الرمز"
-                      >
-                        {showNewCabinPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                    <p className="text-[11px] text-slate-500">
-                      يُطلب هذا الرمز عند محاولة فتح الكابينة للتحكم بمشتركيها وحساباتها.
-                    </p>
-                  </div>
-
                   <div className="pt-2 flex items-center gap-2">
                     <button
                       type="submit"
@@ -2173,35 +1976,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="text-xs text-slate-300 font-semibold flex items-center justify-between">
-                      <span className="flex items-center gap-1.5">
-                        <Lock className="w-3.5 h-3.5 text-amber-400" />
-                        كلمة مرور الكابينة
-                      </span>
-                      <span className="text-[10px] text-amber-400/80">لحماية الدخول</span>
-                    </label>
-                    <div className="relative flex items-center">
-                      <input
-                        type={showEditCabinPassword ? "text" : "password"}
-                        required
-                        value={editCabinPassword}
-                        onChange={(e) => setEditCabinPassword(e.target.value)}
-                        placeholder="رمز الدخول للكابينة"
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs font-mono-numbers text-slate-100 focus:outline-none focus:border-amber-500 text-left pl-10"
-                        dir="ltr"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowEditCabinPassword(!showEditCabinPassword)}
-                        className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
-                        aria-label="إظهار الرمز"
-                      >
-                        {showEditCabinPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
-
                   <div className="pt-2 flex items-center gap-2">
                     <button
                       type="submit"
@@ -2265,130 +2039,6 @@ export default function App() {
                     إلغاء
                   </button>
                 </div>
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>
-
-        {/* --- Cabin Password Verification Modal (قفل فتح الكابينة) --- */}
-        <AnimatePresence>
-          {authenticatingCabin && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-2xl space-y-4"
-              >
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
-                      <Lock className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-slate-100">فتح الكابينة المحمية</h3>
-                      <p className="text-[11px] text-slate-400 truncate max-w-[190px]">{authenticatingCabin.name}</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setAuthenticatingCabin(null);
-                      setEnteredCabinPassword('');
-                      setCabinAuthError(false);
-                    }}
-                    className="p-1 rounded-lg text-slate-400 hover:text-slate-200"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (enteredCabinPassword.trim() === (authenticatingCabin.password || '').trim()) {
-                      setActiveCabinId(authenticatingCabin.id);
-                      setCabinDashboardTab('overview');
-                      setCustomerSearchQuery('');
-                      setActiveProfileCustomerId(null);
-                      setAuthenticatingCabin(null);
-                      setEnteredCabinPassword('');
-                      setCabinAuthError(false);
-                      triggerToast(`تم فتح ${authenticatingCabin.name} بنجاح`);
-                    } else {
-                      setCabinAuthError(true);
-                      triggerToast('عذراً، كلمة المرور غير صحيحة');
-                    }
-                  }}
-                  className="space-y-4"
-                >
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-slate-300 font-semibold flex items-center justify-between">
-                      <span>أدخل كلمة المرور للكابينة</span>
-                      <span className="text-[10px] text-slate-400">المسؤول: {authenticatingCabin.managerName}</span>
-                    </label>
-
-                    <div className="relative flex items-center">
-                      <input
-                        type={showEnteredCabinPassword ? "text" : "password"}
-                        autoFocus
-                        required
-                        value={enteredCabinPassword}
-                        onChange={(e) => {
-                          setEnteredCabinPassword(e.target.value);
-                          if (cabinAuthError) setCabinAuthError(false);
-                        }}
-                        placeholder="••••"
-                        className={`w-full bg-slate-950 border rounded-xl px-3.5 py-3 text-center text-lg font-mono-numbers tracking-widest text-slate-100 focus:outline-none transition-colors ${
-                          cabinAuthError
-                            ? 'border-rose-500 focus:border-rose-500 ring-2 ring-rose-500/20'
-                            : 'border-slate-800 focus:border-amber-500'
-                        }`}
-                        dir="ltr"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowEnteredCabinPassword(!showEnteredCabinPassword)}
-                        className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
-                        aria-label="إظهار الرمز"
-                      >
-                        {showEnteredCabinPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-
-                    {cabinAuthError && (
-                      <p className="text-[11px] text-rose-400 flex items-center gap-1 pt-0.5">
-                        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                        <span>كلمة المرور غير صحيحة، يرجى إعادة المحاولة.</span>
-                      </p>
-                    )}
-
-                    <div className="pt-1 flex items-center justify-between text-[10px] text-slate-500 bg-slate-950/40 p-2 rounded-lg border border-slate-800/40">
-                      <span>الرمز الافتراضي للتجربة:</span>
-                      <span className="font-mono-numbers font-bold text-amber-400">{authenticatingCabin.password}</span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 pt-1">
-                    <button
-                      type="submit"
-                      className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-amber-500/20 active:scale-95 transition-all cursor-pointer"
-                    >
-                      <Unlock className="w-4 h-4 stroke-[2.2]" />
-                      <span>تأكيد والدخول</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAuthenticatingCabin(null);
-                        setEnteredCabinPassword('');
-                        setCabinAuthError(false);
-                      }}
-                      className="py-3 px-4 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold"
-                    >
-                      إلغاء
-                    </button>
-                  </div>
-                </form>
               </motion.div>
             </div>
           )}
@@ -2488,39 +2138,14 @@ export default function App() {
                     </p>
                   </div>
 
-                  <div className="space-y-1.5 pt-1 border-t border-slate-800/80">
-                    <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
-                      <span className="flex items-center gap-1.5">
-                        <KeyRound className="w-4 h-4 text-amber-400" />
-                        تغيير رمز الدخول المخفي
-                      </span>
-                      <span className="text-[10px] text-amber-400/80 font-mono-numbers">الرمز السري</span>
-                    </label>
-                    <div className="relative flex items-center">
-                      <input
-                        type={showSecretCode ? "text" : "password"}
-                        maxLength={12}
-                        required
-                        value={modalForm.secretBackdoorCode}
-                        onChange={(e) => setModalForm({
-                          ...modalForm, 
-                          secretBackdoorCode: e.target.value
-                        })}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm font-mono-numbers text-slate-100 placeholder-slate-600 focus:outline-none focus:border-amber-500 transition-colors text-left pl-10"
-                        dir="ltr"
-                        placeholder="1001"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowSecretCode(!showSecretCode)}
-                        className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
-                        aria-label="إظهار الرمز"
-                      >
-                        {showSecretCode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
-
+                  <fieldset className="space-y-3 border-t border-slate-700 pt-3">
+                    <legend className="font-bold text-sm">تغيير رمز دخول النظام</legend>
+                    <p className="text-xs text-slate-400">اترك الحقول فارغة للإبقاء على الرمز الحالي.</p>
+                    <label className="block text-xs">الرمز الحالي<input type="password" autoComplete="current-password" value={oldCode} onChange={e=>setOldCode(e.target.value)} className="block w-full rounded-xl p-3 bg-slate-950 mt-1"/></label>
+                    <label className="block text-xs">الرمز الجديد<input type="password" inputMode="numeric" maxLength={12} autoComplete="new-password" value={newCode} onChange={e=>setNewCode(e.target.value)} className="block w-full rounded-xl p-3 bg-slate-950 mt-1"/></label>
+                    <label className="block text-xs">تأكيد الرمز الجديد<input type="password" inputMode="numeric" maxLength={12} autoComplete="new-password" value={confirmCode} onChange={e=>setConfirmCode(e.target.value)} className="block w-full rounded-xl p-3 bg-slate-950 mt-1"/></label>
+                    {settingsError&&<p role="alert" className="text-red-400 text-xs">{settingsError}</p>}
+                  </fieldset>
                   {/* Dedicated Action: Add & Manage Cabins inside Generator Settings */}
                   <div className="pt-3 border-t border-slate-800/80 space-y-3">
                     <div className="flex items-center justify-between text-xs">
@@ -2561,7 +2186,7 @@ export default function App() {
                             >
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-1.5">
-                                  <span className="font-bold text-slate-100 truncate">{cabin.name}</span>
+                                  <span className="font-bold text-slate-100 break-words whitespace-normal">{cabin.name}</span>
                                   <span className="text-[10px] text-amber-400 font-mono-numbers bg-amber-500/10 px-1.5 py-0.2 rounded shrink-0">
                                     {cabin.capacityAmps} A
                                   </span>
@@ -2628,4 +2253,18 @@ export default function App() {
       </div>
     </div>
   );
+}
+
+export default function App() {
+  const {data}=useGeneratorData();
+  const code=accessCode(data.settings);
+  const [accepted,setAccepted]=useState<string|null>(null);
+  const [input,setInput]=useState('');const [error,setError]=useState('');
+  if(accepted===code)return <GeneratorApp onLock={()=>{setAccepted(null);setInput('');setError('');}}/>;
+  return <main dir="rtl" className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6"><form onSubmit={e=>{e.preventDefault();if(input===code){setAccepted(code);setInput('');setError('');}else setError('رمز الدخول غير صحيح');}} className="w-full max-w-sm rounded-3xl bg-slate-900 border border-slate-700 p-7 space-y-5">
+    <img src={import.meta.env.BASE_URL+'icon-192.png'} alt="شعار حسن الجنابي" className="w-28 h-28 rounded-2xl mx-auto"/><h1 className="text-xl font-bold text-center">مولدة حسن كريم كاظم</h1><p className="text-center text-slate-400">مرحبًا بعودتك، أدخل رمز الدخول</p>
+    <label className="block text-sm">رمز الدخول<input autoFocus type="password" inputMode="numeric" autoComplete="current-password" value={input} onChange={e=>setInput(e.target.value)} className="mt-2 w-full p-3 rounded-xl bg-slate-950 border border-slate-700 text-center"/></label>
+    {error&&<p role="alert" className="text-red-400 text-sm">{error}</p>}
+    <button className="w-full bg-amber-400 text-slate-950 rounded-xl p-3 font-bold">دخول النظام</button>
+  </form></main>;
 }

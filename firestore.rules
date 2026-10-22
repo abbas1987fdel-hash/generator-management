@@ -6,7 +6,7 @@ service cloud.firestore {
       allow create: if request.resource.data.revision == 1 && valid();
       allow update: if request.resource.data.revision == resource.data.revision + 1 && valid();
       function valid() {
-        return request.resource.data.keys().hasOnly(['data','revision','updatedAt'])
+        return request.resource.data.keys().hasOnly(['data','revision','updatedAt','lastMutationId'])
           && request.resource.data.data.keys().hasOnly(['settings','cabins','subscribers','transactions','invoices','openingCredits','ledgerVersion','closedThrough'])
           && request.resource.data.data.ledgerVersion == 2
           && (!('closedThrough' in request.resource.data.data) || request.resource.data.data.closedThrough is map)

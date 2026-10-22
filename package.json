@@ -1,7 +1,7 @@
 {
   "name": "generator-management",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test tests/data.test.ts tests/accounting.test.ts tests/reports.test.ts"
+    "test": "tsx --test tests/data.test.ts tests/accounting.test.ts tests/reports.test.ts tests/access-whatsapp.test.ts tests/sync.test.ts tests/pwa.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
