@@ -9,9 +9,11 @@ export function whatsappPhone(value:string) {
   else if(/^7\d{9}$/.test(digits)) digits='964'+digits;
   return /^[1-9]\d{7,14}$/.test(digits)&&digits!=='9647700000000'?digits:null;
 }
-export function whatsappAccountLink(phone:string,name:string,cabin:string,total:number,paid:number,remaining:number,now=new Date()) {
+export const DEFAULT_SUBSCRIPTION_MESSAGE = 'السلام عليكم {الاسم}\nكشف حساب اشتراك المولدة\nالكابينة: {الكابينة}\nالمجموع الكلي للحساب: {المجموع}\nالمسدد: {المسدد}\nالمتبقي: {المتبقي}\nالتاريخ والوقت: {التاريخ}';
+export function whatsappAccountLink(phone:string,name:string,cabin:string,total:number,paid:number,remaining:number,now=new Date(),template=DEFAULT_SUBSCRIPTION_MESSAGE) {
   const number=whatsappPhone(phone);if(!number) return null;
   const money=(n:number)=>n.toLocaleString('ar-IQ')+' د.ع';
-  const text=['السلام عليكم '+name,'كشف حساب اشتراك المولدة','الكابينة: '+cabin,'المجموع الكلي للحساب: '+money(total),'المسدد: '+money(paid),'المتبقي: '+money(remaining),'التاريخ والوقت: '+now.toLocaleString('ar-IQ',{timeZone:'Asia/Baghdad'})].join('\n');
+  const values:Record<string,string>={'الاسم':name,'الكابينة':cabin,'المجموع':money(total),'المسدد':money(paid),'المتبقي':money(remaining),'التاريخ':now.toLocaleString('ar-IQ',{timeZone:'Asia/Baghdad'})};
+  const text=(template.trim() || DEFAULT_SUBSCRIPTION_MESSAGE).replace(/\{(الاسم|الكابينة|المجموع|المسدد|المتبقي|التاريخ)\}/g,(_,key:string)=>values[key]);
   return 'https://wa.me/'+number+'?text='+encodeURIComponent(text);
 }

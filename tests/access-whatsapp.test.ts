@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {emptyData} from '../src/data';
 import {accessCode,validateCodeChange} from '../src/access';
-import {whatsappPhone,whatsappAccountLink,whatsappGeneralLink} from '../src/whatsapp';
+import {whatsappPhone,whatsappAccountLink,whatsappGeneralLink,DEFAULT_SUBSCRIPTION_MESSAGE} from '../src/whatsapp';
+import {sortByArabicName} from '../src/sorting';
 import {readFileSync} from 'node:fs';
 import {transformSync} from 'esbuild';
 test('general message has no preset recipient and preserves Arabic and line breaks',()=>{
@@ -36,11 +37,23 @@ test('WhatsApp targets customer number with cumulative totals and Baghdad time',
 test('settings handler persists new global code while preserving other settings',()=>{
  const source=readFileSync(new URL('../src/App.tsx',import.meta.url),'utf8');
  const handler=source.slice(source.indexOf('  const handleSaveSettings'),source.indexOf('  const getCustomerFinancials'));
- const body=transformSync(handler+'\nreturn handleSaveSettings;',{loader:'ts'}).code;
- const settings={...emptyData().settings,loginCode:'19991'};
+ const body=transformSync('const DEFAULT_SUBSCRIPTION_MESSAGE='+JSON.stringify(DEFAULT_SUBSCRIPTION_MESSAGE)+';\n'+handler+'\nreturn handleSaveSettings;',{loader:'ts'}).code;
+ const settings={...emptyData().settings,loginCode:'19991',subscriptionMessage:'اشتراك {الاسم}'};
  let saved:any=null,error='';
  const run=(oldCode:string,confirmCode:string)=>new Function('modalForm','settings','oldCode','newCode','confirmCode','validateCodeChange','accessCode','setSettingsError','setSettings','setIsSettingsOpen','triggerToast',body)(settings,settings,oldCode,'45678',confirmCode,validateCodeChange,accessCode,(v:string)=>error=v,(v:any)=>saved=v,()=>{},()=>{})({preventDefault(){}});
  run('wrong','45678');assert.equal(saved,null);assert.ok(error);
  run('19991','45679');assert.equal(saved,null);
  run('19991','45678');assert.equal((saved as any).loginCode,'45678');assert.equal((saved as any).pricePerAmpere,settings.pricePerAmpere);assert.equal((saved as any).secretBackdoorCode,settings.secretBackdoorCode);
+ assert.equal((saved as any).subscriptionMessage,'اشتراك {الاسم}');
+});
+
+test('custom subscription text resolves tokens and blank text falls back',()=>{
+ const url=new URL(whatsappAccountLink('07801234567','أحمد','باب المعظم',100,20,80,new Date(),'عزيزي {الاسم}\n{الكابينة}: {المتبقي} — {الاسم}')!);
+ assert.equal(url.searchParams.get('text'),'عزيزي أحمد\nباب المعظم: '+(80).toLocaleString('ar-IQ')+' د.ع — أحمد');
+ assert.ok(new URL(whatsappAccountLink('07801234567','أحمد','',0,0,0,new Date(),' ')!).searchParams.get('text')?.includes('كشف حساب اشتراك المولدة'));
+});
+test('Arabic sorting leaves persisted order intact',()=>{
+ const rows=[{name:'ياسر'},{name:'محمد'},{name:'باسم'},{name:'أحمد'},{name:'علي'}];
+ assert.deepEqual(sortByArabicName(rows).map(x=>x.name),['أحمد','باسم','علي','محمد','ياسر']);
+ assert.equal(rows[0].name,'ياسر');
 });

@@ -5,7 +5,8 @@
 
 import React, { useState } from 'react';
 import {accessCode,validateCodeChange} from './access';
-import {whatsappAccountLink} from './whatsapp';
+import {whatsappAccountLink, DEFAULT_SUBSCRIPTION_MESSAGE} from './whatsapp';
+import {sortByArabicName} from './sorting';
 import { useGeneratorData } from './cloud';
 import {ThemeToggle} from './ThemeToggle';
 import {StorageMeter} from './StorageMeter';
@@ -54,6 +55,7 @@ export interface GeneratorSettings {
   pricePerAmpere: number;
   secretBackdoorCode: string;
   loginCode?: string;
+  subscriptionMessage?: string;
 }
 
 // Cabin Model Interface (With Password Protection)
@@ -172,6 +174,7 @@ function GeneratorApp({onLock}:{onLock:()=>void}) {
       totalCapacityAmps: Number(modalForm.totalCapacityAmps),
       pricePerAmpere: Number(modalForm.pricePerAmpere),
       secretBackdoorCode: modalForm.secretBackdoorCode.trim(),
+      subscriptionMessage: modalForm.subscriptionMessage?.trim() || DEFAULT_SUBSCRIPTION_MESSAGE,
     });
 
     setIsSettingsOpen(false);
@@ -500,7 +503,8 @@ function GeneratorApp({onLock}:{onLock:()=>void}) {
 
   // Active Cabin & Active Customer Profile Lookups
   const activeCabin = cabins.find((c) => c.id === activeCabinId) || null;
-  const activeCabinSubscribers = activeCabin ? subscribers.filter((s) => s.cabinId === activeCabin.id) : [];
+  const sortedCabins = sortByArabicName(cabins);
+  const activeCabinSubscribers = activeCabin ? sortByArabicName(subscribers.filter((s) => s.cabinId === activeCabin.id)) : [];
   
   // Categorize subscribers by payment status dynamically
   const paidSubscribers = activeCabinSubscribers.filter((s) => getCustomerFinancials(s).isFullyPaid);
@@ -532,7 +536,7 @@ function GeneratorApp({onLock}:{onLock:()=>void}) {
 
   const buildWhatsAppLink = (sub:Subscriber) => {
     const f=getCustomerFinancials(sub);
-    return whatsappAccountLink(sub.phone,sub.name,cabins.find(c=>c.id===sub.cabinId)?.name??'',f.totalDue,f.effectivePaid,f.remainingBalance);
+    return whatsappAccountLink(sub.phone,sub.name,cabins.find(c=>c.id===sub.cabinId)?.name??'',f.totalDue,f.effectivePaid,f.remainingBalance,new Date(),settings.subscriptionMessage);
   };
   const whatsappButton = (sub:Subscriber) => {
     const link=buildWhatsAppLink(sub);
@@ -1044,7 +1048,7 @@ function GeneratorApp({onLock}:{onLock:()=>void}) {
 
               {/* Cabins Vertical List */}
               <div className="space-y-2.5">
-                {cabins
+                {sortedCabins
                   .filter((c) =>
                     c.name.toLowerCase().includes(cabinSearchQuery.toLowerCase()) ||
                     c.managerName.toLowerCase().includes(cabinSearchQuery.toLowerCase())
@@ -2143,6 +2147,14 @@ function GeneratorApp({onLock}:{onLock:()=>void}) {
                     <label className="block text-xs">تأكيد الرمز الجديد<input type="password" inputMode="numeric" maxLength={12} autoComplete="new-password" value={confirmCode} onChange={e=>setConfirmCode(e.target.value)} className="block w-full rounded-xl p-3 bg-slate-950 mt-1"/></label>
                     {settingsError&&<p role="alert" className="text-red-400 text-xs">{settingsError}</p>}
                   </fieldset>
+                  <div className="space-y-2 border-t border-slate-800 pt-4">
+                    <label htmlFor="subscription-message" className="block text-sm font-bold text-amber-400">رسالة الاشتراك عبر واتساب</label>
+                    <p className="text-xs text-slate-400">عدّل النص الذي يظهر عند إرسال واتساب للمشترك أو تذكيره. تتبدل الكلمات بين الأقواس تلقائيًا ببيانات الزبون.</p>
+                    <p className="text-xs text-slate-300">{'{الاسم} · {الكابينة} · {المجموع} · {المسدد} · {المتبقي} · {التاريخ}'}</p>
+                    <textarea id="subscription-message" dir="rtl" rows={8} maxLength={4000} value={modalForm.subscriptionMessage ?? DEFAULT_SUBSCRIPTION_MESSAGE} onChange={e=>setModalForm({...modalForm,subscriptionMessage:e.target.value})} className="w-full rounded-xl bg-slate-950 border border-slate-800 p-3 text-sm text-slate-100" />
+                    <button type="button" onClick={()=>setModalForm({...modalForm,subscriptionMessage:DEFAULT_SUBSCRIPTION_MESSAGE})} className="text-xs text-amber-400 underline">استعادة الرسالة الافتراضية</button>
+                    <p className="text-xs text-slate-400">اضغط حفظ الإعدادات لاعتماد الرسالة. ترك النص فارغًا يعيد الرسالة الافتراضية.</p>
+                  </div>
                   {/* Dedicated Action: Add & Manage Cabins inside Generator Settings */}
                   <div className="pt-3 border-t border-slate-800/80 space-y-3">
                     <div className="flex items-center justify-between text-xs">
@@ -2174,7 +2186,7 @@ function GeneratorApp({onLock}:{onLock:()=>void}) {
                           لا توجد كابينات مضافة بعد.
                         </div>
                       ) : (
-                        cabins.map((cabin) => {
+                        sortedCabins.map((cabin) => {
                           const cabinSubsCount = subscribers.filter((s) => s.cabinId === cabin.id).length;
                           return (
                             <div
