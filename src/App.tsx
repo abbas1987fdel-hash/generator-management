@@ -478,19 +478,22 @@ function GeneratorApp({onLock}:{onLock:()=>void}) {
   // Confirm delete cabin
   const handleConfirmDeleteCabin = () => {
     if (!cabinToDelete) return;
-    if (subscribers.some(s=>s.cabinId===cabinToDelete.id)) { triggerToast('لا يمكن حذف كابينة تحتوي مشتركين حفاظًا على سجلاتهم'); return; }
     const deletedName = cabinToDelete.name;
     const deletedId = cabinToDelete.id;
 
-    // Remove cabin
-    setCabins((prev) => prev.filter((c) => c.id !== deletedId));
-
-    // Remove subscribers belonging to this cabin
-    const deletedCustomerIds = new Set(
-      subscribers.filter((s) => s.cabinId === deletedId).map((s) => s.id)
-    );
-    setSubscribers((prev) => prev.filter((s) => s.cabinId !== deletedId));
-    setTransactions((prev) => prev.filter((t) => !deletedCustomerIds.has(t.customerId)));
+    // Delete the cabin and its ledger together using the latest local state.
+    update(previous => {
+      const customerIds = new Set(previous.subscribers.filter(s => s.cabinId === deletedId).map(s => s.id));
+      return {
+        ...previous,
+        cabins: previous.cabins.filter(c => c.id !== deletedId),
+        subscribers: previous.subscribers.filter(s => !customerIds.has(s.id)),
+        invoices: previous.invoices.filter(i => !customerIds.has(i.customerId)),
+        transactions: previous.transactions.filter(t => !customerIds.has(t.customerId)),
+        openingCredits: Object.fromEntries(Object.entries(previous.openingCredits).filter(([id]) => !customerIds.has(id))),
+        ...(previous.closedThrough ? {closedThrough: Object.fromEntries(Object.entries(previous.closedThrough).filter(([id]) => !customerIds.has(id)))} : {}),
+      };
+    });
 
     if (activeCabinId === deletedId) {
       setActiveCabinId(null);

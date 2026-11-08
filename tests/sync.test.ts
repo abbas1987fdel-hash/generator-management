@@ -81,3 +81,32 @@ test('concurrent different edits of the same receipt still require resolution',(
  const local=clone(base),remote=clone(base);local.transactions[0].amount=200;remote.transactions[0].amount=300;
  assert.throws(()=>mergeLedger(base,local,remote),ConflictError);
 });
+
+// Exercise the actual confirmation handler and persistence without live customer data.
+test('confirmed cabin deletion persists all related records together and preserves other cabins',async()=>{
+ const {readFileSync}=await import('node:fs');
+ const {transformSync}=await import('esbuild');
+ const source=readFileSync(new URL('../src/App.tsx',import.meta.url),'utf8');
+ const handler=source.slice(source.indexOf('  const handleConfirmDeleteCabin'),source.indexOf('  // Active Cabin & Active Customer'));
+ const body=transformSync(handler+'\nreturn handleConfirmDeleteCabin;',{loader:'ts'}).code;
+ const h=harness();const initial=clone(h.cloud.data);
+ initial.cabins.push({...initial.cabins[0],id:'other'});
+ initial.subscribers.push({...initial.subscribers[0],id:'other-s',cabinId:'other'});
+ initial.invoices.push({...initial.invoices[0],id:'other-i',customerId:'other-s'});
+ initial.transactions=[{id:'t',customerId:'s',amount:10,date:'2026-10-22',time:'12:00'},{id:'other-t',customerId:'other-s',amount:20,date:'2026-10-22',time:'12:00'}];
+ initial.openingCredits={s:30,'other-s':40};initial.closedThrough={s:'2026-09','other-s':'2026-09'};
+ h.cloud={data:initial,revision:1};const e=h.create();await e.start();h.online=false;
+ const noop=()=>{};let updates=0;
+ const update=(fn:any)=>{updates++;e.update(fn);};
+ new Function('cabinToDelete','subscribers','update','setCabins','setSubscribers','setTransactions','activeCabinId','setActiveCabinId','setActiveProfileCustomerId','setCabinToDelete','triggerToast',body)(initial.cabins[0],initial.subscribers,update,noop,noop,noop,'c',noop,noop,noop,noop)();
+ assert.equal(updates,1);await tick();
+ const restarted=h.create();await restarted.start();h.online=true;await restarted.sync();
+ const result=h.cloud.data;
+ assert.deepEqual(result.cabins,[initial.cabins[1]]);
+ assert.deepEqual(result.subscribers,[initial.subscribers[1]]);
+ assert.deepEqual(result.invoices,[initial.invoices[1]]);
+ assert.deepEqual(result.transactions,[initial.transactions[1]]);
+ assert.deepEqual(result.openingCredits,{'other-s':40});
+ assert.deepEqual(result.closedThrough,{'other-s':'2026-09'});
+ assert.equal(h.writes,1);
+});
